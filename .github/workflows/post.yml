@@ -1,0 +1,99 @@
+name: VK news bot
+
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Одновременный запуск разрешён только одной копии воркфлоу.
+# Без этого два запуска наложались: VK отвечал flood control (код 9)
+# на wall.get, а git push падал с "fetch first" (seen.sqlite конфликтовал).
+concurrency:
+  group: vk-news-bot
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to VK
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot and save database
+        env:
+          VK_TOKEN: ${{ secrets.VK_TOKEN }}
+          GROUP_ID: ${{ secrets.GROUP_ID }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          set +e
+          python vk_news_bot.py --post
+          rc=$?
+          set -e
+
+          # 3 = бот сам пропустил запуск (VK-лимит или не прошёл
+          # минимальный интервал): база не менялась, коммитить нечего
+          if [ "$rc" -eq 3 ]; then
+            echo "бот пропустил запуск - seen.sqlite не коммитим"
+            exit 0
+          fi
+
+          # Коммитим базу только если бот реально её изменил
+          # (маркер data/.db_changed ставится при каждой записи в базу)
+          if [ -f data/.db_changed ] && [ -f data/seen.sqlite ] && ! git diff --quiet -- data/seen.sqlite; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/seen.sqlite
+            git commit -m "Update seen.sqlite"
+
+            pushed=0
+            for i in 1 2 3; do
+              if git push origin main; then
+                pushed=1
+                echo "seen.sqlite сохранена в репозитории"
+                break
+              fi
+              # push отклонён: пока бот работал, в репозитории появилась
+              # более свежая база. git не может слить бинарный файл, поэтому
+              # объединяем записи двух баз через tools/merge_seen_db.py
+              # и коммитим поверх актуального origin/main.
+              echo "push отклонён (попытка $i/3): сливаю базы и пробую снова"
+              git fetch origin main
+              cp data/seen.sqlite /tmp/our_seen.sqlite
+              if git show FETCH_HEAD:data/seen.sqlite > /tmp/remote_seen.sqlite 2>/dev/null; then
+                python3 tools/merge_seen_db.py /tmp/remote_seen.sqlite data/seen.sqlite \
+                  || cp /tmp/our_seen.sqlite data/seen.sqlite
+              fi
+              cp data/seen.sqlite /tmp/merged_seen.sqlite
+              git reset --hard FETCH_HEAD
+              cp /tmp/merged_seen.sqlite data/seen.sqlite
+              git add data/seen.sqlite
+              git commit -m "Update seen.sqlite" || echo "база совпала с удалённой - коммит не нужен"
+              sleep 10
+            done
+
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::не удалось запушить seen.sqlite после 3 попыток - есть риск повторной публикации тех же новостей при следующем запуске"
+              rc=1
+            fi
+          else
+            echo "seen.sqlite не изменилась - коммит не нужен"
+          fi
+
+          exit $rc
