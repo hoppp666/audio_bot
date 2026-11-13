@@ -1,0 +1,90 @@
+name: VK audio bot
+
+on:
+  schedule:
+    # 5 запусков в день: 07:00, 12:00, 17:00, 22:00 и 01:00 по Москве
+    # (= 04:00, 09:00, 14:00, 19:00 и 22:00 UTC). По 12 треков за запуск
+    # при дневном лимите 50 - итого ~50 треков в сутки. Раскидано по дню,
+    # чтобы не ловить антифлуд VK одним большим пакетом.
+    - cron: "0 4,9,14,19,22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Одновременный запуск разрешён только одной копии воркфлоу
+# (как у основного бота: иначе VK лимиты и конфликт git push).
+concurrency:
+  group: vk-audio-bot
+  cancel-in-progress: false
+
+jobs:
+  add-tracks:
+    name: Add trending tracks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Add trending tracks
+        env:
+          VK_TOKEN: ${{ secrets.VK_TOKEN }}
+          GROUP_ID: ${{ secrets.GROUP_ID }}
+        run: |
+          set +e
+          python vk_audio_bot.py
+          rc=$?
+          set -e
+
+          # 3 = бот сам пропустил запуск (дневной лимит / нечего добавлять /
+          # антифлуд VK): база не менялась, коммитить нечего
+          if [ "$rc" -eq 3 ]; then
+            echo "бот пропустил запуск - audio.sqlite не коммитим"
+            exit 0
+          fi
+
+          # Коммитим базу только если бот реально добавил треки
+          # (маркер data/.audio_db_changed ставится при каждой записи)
+          if [ -f data/.audio_db_changed ] && [ -f data/audio.sqlite ] && ! git diff --quiet -- data/audio.sqlite; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/audio.sqlite
+            git commit -m "Update audio.sqlite"
+
+            pushed=0
+            for i in 1 2 3; do
+              if git push origin main; then
+                pushed=1
+                echo "audio.sqlite сохранена в репозитории"
+                break
+              fi
+              echo "push отклонён (попытка $i/3): обновляю и пробую снова"
+              git fetch origin main
+              cp data/audio.sqlite /tmp/our_audio.sqlite
+              git reset --hard FETCH_HEAD
+              cp /tmp/our_audio.sqlite data/audio.sqlite
+              git add data/audio.sqlite
+              git commit -m "Update audio.sqlite" || echo "база совпала с удалённой - коммит не нужен"
+              sleep 10
+            done
+
+            if [ "$pushed" -ne 1 ]; then
+              echo "::error::не удалось запушить audio.sqlite после 3 попыток"
+              rc=1
+            fi
+          else
+            echo "audio.sqlite не изменилась - коммит не нужен"
+          fi
+
+          exit $rc
