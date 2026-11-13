@@ -1,0 +1,106 @@
+# Настройки конвейера и список источников.
+# Рубрики: fashion (Fashion и красивые образы), stars (Фотосессии звёзд),
+#          music (Популярная музыка), style (Девушки, стиль и настроение).
+
+settings:
+  posts_per_run: 1            # строго 1 пост за запуск
+  min_interval_minutes: 115   # защита: не публиковать, если с прошлого поста прошло меньше 115 минут (~2 часа)
+  max_age_hours: 48           # не брать новости старше этого срока
+  images_per_post: 2          # сколько фото прикреплять к посту
+  min_image_width: 400        # отбрасывать слишком мелкие картинки
+  require_image: true         # пост без картинки пропускается
+  credit_source: true         # строка "Фото: <источник>" в конце поста (без ссылок)
+  group_shortname: ""         # короткий адрес группы (напр. "fashion.beauty"), для хэштегов
+  fuzzy_dedup_threshold: 0.76 # похожесть заголовков (0..1), выше - считать дубликатом
+
+# Общие фильтры: применяются ко ВСЕМ источникам (регистр не важен)
+global_exclude:
+  - "black friday"
+  - "gift guide"
+  - "shopping deals"
+  - "best early"
+  - "cyber monday"
+  - "coupon"
+
+rubrics:
+  fashion:
+    emoji: "💎"
+    hashtags: ["fashion", "стиль", "образы"]
+  stars:
+    emoji: "📸"
+    hashtags: ["звёзды", "фотосессия", "шоубиз"]
+  music:
+    emoji: "🎶"
+    hashtags: ["музыка", "хиты"]
+  style:
+    emoji: "✨"
+    hashtags: ["стиль", "красота", "настроение"]
+
+sources:
+  # ---- Фотосессии и фоторепортажи звёзд ----
+  - name: "Just Jared"
+    url: "https://justjared.com/feed/"
+    alt_urls:
+      - "https://news.google.com/rss/search?q=site:justjared.com+when:2d&hl=en-US&gl=US&ceid=US:en"
+    rubric: stars
+    enabled: true
+
+  - name: "Daily Mail TV & Showbiz"
+    url: "https://www.dailymail.co.uk/tvshowbiz/articles.rss"
+    alt_urls:
+      - "https://news.google.com/rss/search?q=site:dailymail.co.uk+tvshowbiz+when:2d&hl=en-US&gl=US&ceid=US:en"
+    rubric: stars
+    enabled: true
+
+  - name: "Fashion Gone Rogue"
+    url: "https://www.fashiongonerogue.com/feed/"
+    rubric: fashion
+    enabled: true
+
+  # ---- Fashion и красивые образы ----
+  - name: "Vogue"
+    url: "https://www.vogue.com/feed/rss"
+    rubric: fashion
+    enabled: true
+
+  - name: "ELLE Fashion"
+    url: "https://www.elle.com/rss/fashion.xml"
+    rubric: fashion
+    enabled: true
+
+  - name: "Harper's Bazaar"
+    url: "https://www.harpersbazaar.com/rss/all.xml"
+    rubric: fashion
+    enabled: true
+
+  - name: "Go Fug Yourself"
+    url: "https://www.gofugyourself.com/feed"
+    rubric: fashion
+    enabled: true
+
+  # ---- Популярная музыка ----
+  - name: "Billboard"
+    url: "https://www.billboard.com/feed/"
+    rubric: music
+    enabled: true
+
+  - name: "Rolling Stone"
+    url: "https://www.rollingstone.com/feed/"
+    rubric: music
+    enabled: true
+    include_keywords: ["music", "song", "album", "tour", "concert", "chart",
+                       "single", "festival", "artist", "band", "debut", "ep ",
+                       "music video", "billboard", "rock", "pop ", "rapper"]
+
+  # ---- Девушки, стиль и настроение ----
+  - name: "Daily Mail Femail"
+    url: "https://www.dailymail.co.uk/femail/articles.rss"
+    rubric: style
+    enabled: true
+    exclude_keywords: ["relationship", "divorce", "therapy"]
+
+  - name: "Popsugar"
+    url: "https://www.popsugar.com/rss"
+    rubric: style
+    enabled: true
+    exclude_keywords: ["recipe", "workout", "fitness plan"]
